@@ -35,6 +35,7 @@
   --radius:14px;
   --radius-sm:8px;
   --shadow:0 10px 30px rgba(0,0,0,.35);
+  --topbar-h:78px;
   font-family:'Inter',sans-serif;
 }
 *{box-sizing:border-box;}
@@ -278,7 +279,7 @@ select.filter, .filter-select{
 @keyframes blink{0%,100%{opacity:.2;}50%{opacity:1;}}
 
 /* toasts */
-#toast-stack{position:fixed;top:20px;right:20px;z-index:200;display:flex;flex-direction:column;gap:10px;width:340px;}
+#toast-stack{position:fixed;top:calc(var(--topbar-h, 78px) + 14px);right:20px;z-index:200;display:flex;flex-direction:column;gap:10px;width:340px;transition:top .2s ease;}
 .toast{
   position:relative;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;
   padding:13px 16px 13px 14px;box-shadow:var(--shadow);overflow:hidden;
@@ -1835,6 +1836,7 @@ document.getElementById("resetBtn").addEventListener("click", ()=>{
 
     const pState = {pct:0};
     let progressTween = null;
+    let highestPct = 0;
     function paint(pct){
       if(ringProgress) ringProgress.style.strokeDashoffset = circumference*(1-pct/100);
       if(meterFill) meterFill.style.width = pct+"%";
@@ -1843,6 +1845,12 @@ document.getElementById("resetBtn").addEventListener("click", ()=>{
     paint(0);
 
     window.__loaderAdvance = function(target, label){
+      // Progress only ever moves forward — a late/duplicate call (e.g. a
+      // second auth-state event, or the keep-alive creep firing after real
+      // progress already landed) must never drag the bar backwards.
+      if(target < highestPct) return;
+      highestPct = target;
+
       if(statusEl && label && statusEl.textContent !== label){
         if(hasGSAP && !reduceMotion){
           gsap.to(statusEl, {opacity:0, y:-4, duration:.15, onComplete:()=>{
@@ -1882,9 +1890,36 @@ document.getElementById("resetBtn").addEventListener("click", ()=>{
       document.querySelectorAll(".loader-wordmark .ch").forEach(ch=>{ ch.style.opacity=1; ch.style.transform="none"; });
     }
 
-    // Keeps the loader feeling alive before the first real milestone lands;
-    // any later call to __loaderAdvance smoothly overrides this.
-    setTimeout(()=>{ if(window.__loaderAdvance) window.__loaderAdvance(16, "Booting interface"); }, 300);
+    // Keeps the loader feeling alive before the first real milestone lands.
+    // Guarded so it never fires once real progress has already started —
+    // this is what was previously yanking the bar back down to 16%.
+    setTimeout(()=>{
+      if(highestPct === 0 && window.__loaderAdvance) window.__loaderAdvance(16, "Booting interface");
+    }, 300);
+  }
+
+  /* ---------------------------------------------------------------
+     7) Keep --topbar-h in sync with the real header size, so the
+     toast stack (and anything else anchored below it) never
+     overlaps the role-switch / reset / user-chip / logout controls.
+  ---------------------------------------------------------------- */
+  function initTopbarHeightSync(){
+    const topbar = document.querySelector(".topbar");
+    if(!topbar) return;
+    const update = ()=>{
+      const h = topbar.offsetHeight;
+      if(h>0) document.documentElement.style.setProperty("--topbar-h", h+"px");
+    };
+    update();
+    if(window.ResizeObserver){
+      new ResizeObserver(update).observe(topbar);
+    } else {
+      window.addEventListener("resize", update);
+    }
+    const appEl = document.getElementById("app");
+    if(appEl && window.MutationObserver){
+      new MutationObserver(update).observe(appEl, {attributes:true, attributeFilter:["class"]});
+    }
   }
 
   /* ---------------------------------------------------------------
@@ -1897,6 +1932,7 @@ document.getElementById("resetBtn").addEventListener("click", ()=>{
     initMagneticButtons();
     initModalAnimation();
     initAuthCard();
+    initTopbarHeightSync();
   }
   if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
