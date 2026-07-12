@@ -322,6 +322,8 @@ select.filter, .filter-select{
   .issue-row{grid-template-columns:1fr;text-align:left;}
   .nameplate{flex-direction:column;}
   #toast-stack{width:calc(100% - 40px);}
+  .topbar{flex-wrap:wrap;row-gap:10px;padding-bottom:12px;}
+  .role-switch{flex-wrap:wrap;row-gap:8px;width:100%;}
 }
 @media (prefers-reduced-motion: reduce){
   *{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important;}
@@ -498,6 +500,11 @@ select.filter, .filter-select{
 
 @media (max-width:480px){
   .loader-panel{padding:34px 30px;}
+  .loader-orbit-wrap{width:104px;height:104px;}
+  .loader-wordmark{font-size:17px;}
+  .loader-meter{width:170px;}
+  #userEmailLabel{display:none;}
+  .user-chip{padding:6px;}
 }
 @media (prefers-reduced-motion: reduce){
   #bootLoader{transition:opacity .01ms;}
@@ -749,7 +756,7 @@ function hideBootLoader(){
   loader.dataset.hidden = "1";
   if(window.__loaderAdvance) window.__loaderAdvance(100, "Ready");
   const elapsed = Date.now() - __loaderStart;
-  const wait = Math.max(220, __MIN_LOADER_MS - elapsed);
+  const wait = Math.max(500, __MIN_LOADER_MS - elapsed);
   setTimeout(()=>{
     if(typeof gsap !== "undefined"){
       const tl = gsap.timeline({onComplete:()=>loader.classList.add("loader-gone")});
@@ -765,8 +772,21 @@ function hideBootLoader(){
 setTimeout(hideBootLoader, 8000);
 if(window.__loaderAdvance) window.__loaderAdvance(30, "Connecting to secure services");
 
+let __authDebounceTimer = null;
 auth.onAuthStateChanged((user)=>{
   if(window.__loaderAdvance) window.__loaderAdvance(62, "Authenticating session");
+  // Firebase can call this back-to-back on first load — an initial guess
+  // (often null) followed almost immediately by the real, persisted state
+  // once it finishes restoring from storage. Applying each call straight
+  // to the DOM makes the UI flash auth screen → app (or vice versa),
+  // which reads as "loading twice", especially on slower mobile devices.
+  // Debouncing collapses any rapid-fire calls into a single, final,
+  // smooth transition using only the last (authoritative) state.
+  clearTimeout(__authDebounceTimer);
+  __authDebounceTimer = setTimeout(()=>applyAuthState(user), 120);
+});
+
+function applyAuthState(user){
   const authScreen = document.getElementById("authScreen");
   const app = document.getElementById("app");
   if(user){
@@ -794,7 +814,7 @@ auth.onAuthStateChanged((user)=>{
     document.getElementById("loginPassword").value = "";
   }
   hideBootLoader();
-});
+}
 </script>
 
 <script>
@@ -1865,7 +1885,12 @@ document.getElementById("resetBtn").addEventListener("click", ()=>{
       }
       if(hasGSAP && !reduceMotion){
         if(progressTween) progressTween.kill();
-        progressTween = gsap.to(pState, {pct:target, duration:0.9, ease:"power2.out", onUpdate:()=>paint(pState.pct)});
+        // Duration scales with the distance left to travel, so a big early jump
+        // (0→30) and a small late nudge (96→100) both feel like one continuous
+        // glide instead of restarting the same fixed-length animation each time.
+        const dist = Math.max(target - pState.pct, 1);
+        const dur = target>=100 ? Math.min(0.45, 0.25 + dist*0.006) : Math.min(0.9, 0.35 + dist*0.011);
+        progressTween = gsap.to(pState, {pct:target, duration:dur, ease:"sine.out", overwrite:true, onUpdate:()=>paint(pState.pct)});
       } else {
         pState.pct = target;
         paint(target);
